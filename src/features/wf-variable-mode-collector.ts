@@ -4,21 +4,21 @@ import { getWfPublishDate } from '../utils/get-wf-publish-date';
  * Extracts CSS custom properties (variables) applied to multiple elements from their classes.
  * This function assumes each element has exactly one class that contains all its styling.
  * Only extracts properties that start with '--' (CSS variables).
- * The stylesheet is only parsed once for efficiency.
+ * The stylesheet is fetched and parsed once for efficiency.
  *
  * @param elements Array of target HTML elements
- * @returns A Map associating each element with its CSS custom properties
+ * @returns A Promise resolving to a Map associating each element with its CSS custom properties
  */
-function extractCssCustomProperties(
+async function extractCssCustomProperties(
   elements: HTMLElement[]
-): Map<HTMLElement, Record<string, string>> {
+): Promise<Map<HTMLElement, Record<string, string>>> {
   // Initialize result map
   const result = new Map<HTMLElement, Record<string, string>>();
 
   // Find the first loaded stylesheet
   const firstStylesheet = document.styleSheets[0];
-  if (!firstStylesheet) {
-    // Return empty map if no stylesheets
+  if (!firstStylesheet || !firstStylesheet.href) {
+    // Return empty map if no stylesheets or no href
     return result;
   }
 
@@ -26,8 +26,42 @@ function extractCssCustomProperties(
   const classRulesMap = new Map<string, Record<string, string>>();
 
   try {
-    // Parse the stylesheet once
-    const cssRules = firstStylesheet.cssRules || firstStylesheet.rules;
+    // Fetch the stylesheet directly instead of accessing through DOM
+    const stylesheetUrl = firstStylesheet.href;
+    const response = await fetch(stylesheetUrl);
+
+    if (!response.ok) {
+      throw new Error(`Failed to fetch stylesheet: ${response.status} ${response.statusText}`);
+    }
+
+    const cssText = await response.text();
+
+    // Parse the CSS text using regex to find class selectors and their properties
+    const classRegex = /\.([^\s{,:]+)\s*{([^}]*)}/g;
+    let match;
+
+    while ((match = classRegex.exec(cssText)) !== null) {
+      const className = match[1];
+      const styleBlock = match[2];
+
+      if (!className || !styleBlock) continue;
+
+      // Extract CSS variables
+      const variableRegex = /(--[^:]+):\s*([^;]+);/g;
+      let varMatch;
+      const customProps: Record<string, string> = {};
+
+      while ((varMatch = variableRegex.exec(styleBlock)) !== null) {
+        const propName = varMatch[1]!.trim();
+        const propValue = varMatch[2]!.trim();
+        customProps[propName] = propValue;
+      }
+
+      // Store the results in the class map if any CSS variables were found
+      if (Object.keys(customProps).length > 0) {
+        classRulesMap.set(className, customProps);
+      }
+    }
 
     // Process each element
     for (const element of elements) {
@@ -46,37 +80,10 @@ function extractCssCustomProperties(
       if (classRulesMap.has(className)) {
         // Reuse the cached rules
         result.set(element, { ...classRulesMap.get(className)! });
-        continue;
-      }
-
-      // Find the rule for this class
-      for (let i = 0; i < cssRules.length; i++) {
-        const rule = cssRules[i];
-
-        // Check if this is a style rule and matches our class
-        if (rule instanceof CSSStyleRule && rule.selectorText === `.${className}`) {
-          // Extract custom properties from the matching rule
-          const style = rule.style;
-          for (let j = 0; j < style.length; j++) {
-            const propertyName = style[j]!;
-            // Only include properties that start with -- (CSS variables)
-            if (propertyName.startsWith('--')) {
-              const propertyValue = style.getPropertyValue(propertyName).trim();
-              if (propertyValue) {
-                elementRules[propertyName] = propertyValue;
-              }
-            }
-          }
-
-          // Cache the rules for this class
-          classRulesMap.set(className, { ...elementRules });
-          break; // Stop after finding the first matching rule
-        }
       }
     }
   } catch (e) {
-    // CORS restrictions can cause security errors when accessing cross-origin stylesheets
-    console.warn('Could not access stylesheet rules:', e);
+    console.warn('Error fetching or parsing stylesheet:', e);
   }
 
   return result;
@@ -119,7 +126,7 @@ window.wfVarModes = {
   },
 };
 
-const extractWebflowVariableModes = (): VariableModes => {
+const extractWebflowVariableModes = async (): Promise<VariableModes> => {
   // Get the current site publish date
   const currentPublishDate = getWfPublishDate();
   const publishDateString = currentPublishDate?.toISOString() || '';
@@ -148,7 +155,8 @@ const extractWebflowVariableModes = (): VariableModes => {
     document.querySelectorAll<HTMLElement>('[data-variable-mode]')
   );
 
-  const result = extractCssCustomProperties(variableModeElements);
+  // Await the async extraction function
+  const result = await extractCssCustomProperties(variableModeElements);
 
   const variableModes: VariableModes = {};
 
@@ -179,9 +187,9 @@ const extractWebflowVariableModes = (): VariableModes => {
 };
 
 // Initialize variable modes and dispatch event
-const initWfVarModes = (): void => {
-  // Extract the variable modes
-  const variableModes = extractWebflowVariableModes();
+const initWfVarModes = async (): Promise<void> => {
+  // Extract the variable modes (await the async function)
+  const variableModes = await extractWebflowVariableModes();
 
   // Update the global object
   window.wfVarModes.data = variableModes;
@@ -193,5 +201,7 @@ const initWfVarModes = (): void => {
   console.log('WF Variable Modes ready:', variableModes);
 };
 
-// Run initialization
-initWfVarModes();
+// Run initialization asynchronously
+(async () => {
+  await initWfVarModes();
+})();
