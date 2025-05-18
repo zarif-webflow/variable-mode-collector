@@ -1,0 +1,27 @@
+{
+  "name": "airdxb",
+  "private": true,
+  "version": "0.0.0",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "build": "rollup --config rollup.config.ts --configPlugin typescript",
+    "dev": "rollup --watch --config rollup.config.ts --configPlugin typescript"
+  },
+  "devDependencies": {
+    "@rollup/plugin-typescript": "^11.1.6",
+    "rollup": "^4.20.0",
+    "rollup-plugin-dev": "^2.0.5",
+    "rollup-plugin-iife": "^0.7.1",
+    "rollup-plugin-import-css": "^3.5.6",
+    "typescript": "^5.5.2"
+  },
+  "dependencies": {
+    "@rollup/plugin-commonjs": "^26.0.1",
+    "@rollup/plugin-node-resolve": "^15.2.3",
+    "@rollup/plugin-replace": "^5.0.7",
+    "es-toolkit": "^1.16.0",
+    "rollup-plugin-esbuild": "^6.1.1",
+    "rollup-plugin-livereload": "^2.0.5",
+    "rollup-plugin-serve": "^1.1.1"
+  }
+}
