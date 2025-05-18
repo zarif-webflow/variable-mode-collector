@@ -9,7 +9,9 @@ import servePlugin from 'rollup-plugin-serve';
 import css from 'rollup-plugin-import-css';
 
 export default defineConfig({
-  input: {},
+  input: {
+    'wf-variable-mode-collector': './src/features/wf-variable-mode-collector.ts',
+  },
   output: {
     format: 'module',
     dir: 'dist',
@@ -30,7 +32,7 @@ export default defineConfig({
     esbuildPlugin({ minify: true, target: 'es2020', platform: 'browser' }),
     servePlugin({
       contentBase: 'dist',
-      port: 3000,
+      port: 3001,
       headers: {
         'Access-Control-Allow-Origin': '*',
       },
