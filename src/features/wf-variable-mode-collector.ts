@@ -1,4 +1,4 @@
-import { getWfPublishDate } from '../utils/get-wf-publish-date';
+import { getPublishDate as getWfPublishDate } from "@finsweet/ts-utils";
 
 /**
  * Extracts CSS custom properties (variables) applied to multiple elements from their classes.
@@ -83,7 +83,7 @@ async function extractCssCustomProperties(
       }
     }
   } catch (e) {
-    console.warn('Error fetching or parsing stylesheet:', e);
+    console.error("Error fetching or parsing stylesheet:", e);
   }
 
   return result;
@@ -95,7 +95,7 @@ interface CachedVariableModes {
   data: VariableModes;
 }
 
-const CACHE_KEY = 'webflow-variable-modes-cache';
+const CACHE_KEY = "webflow-variable-modes-cache";
 
 // Global interface for wfVarModes
 interface WfVarModesObject {
@@ -121,7 +121,7 @@ window.wfVarModes = {
       setTimeout(() => callback(this.data!), 0);
     } else {
       // Otherwise, add event listener
-      window.addEventListener('wfVarModesReady', () => callback(this.data!));
+      window.addEventListener("wfVarModesReady", () => callback(this.data!));
     }
   },
 };
@@ -129,7 +129,7 @@ window.wfVarModes = {
 const extractWebflowVariableModes = async (): Promise<VariableModes> => {
   // Get the current site publish date
   const currentPublishDate = getWfPublishDate();
-  const publishDateString = currentPublishDate?.toISOString() || '';
+  const publishDateString = currentPublishDate?.toISOString() || "";
 
   // Try to get cached data
   try {
@@ -140,19 +140,19 @@ const extractWebflowVariableModes = async (): Promise<VariableModes> => {
 
       // If the publish date matches, use cached data
       if (parsedCache.publishDate === publishDateString) {
-        console.log('Using cached variable modes from', publishDateString);
+        console.debug("Using cached variable modes from", publishDateString);
         return parsedCache.data;
       }
     }
   } catch (e) {
-    console.warn('Error accessing localStorage cache:', e);
+    console.error("Error accessing localStorage cache:", e);
   }
 
   // If no cache or invalid cache, calculate fresh data
-  console.log('Calculating fresh variable modes data');
+  console.debug("Calculating fresh variable modes data");
 
   const variableModeElements = Array.from(
-    document.querySelectorAll<HTMLElement>('[data-variable-mode]')
+    document.querySelectorAll<HTMLElement>("[data-variable-mode]")
   );
 
   // Await the async extraction function
@@ -179,7 +179,7 @@ const extractWebflowVariableModes = async (): Promise<VariableModes> => {
 
       localStorage.setItem(CACHE_KEY, JSON.stringify(cacheData));
     } catch (e) {
-      console.warn('Error caching variable modes:', e);
+      console.error("Error caching variable modes:", e);
     }
   }
 
@@ -196,9 +196,9 @@ const initWfVarModes = async (): Promise<void> => {
   window.wfVarModes.isReady = true;
 
   // Dispatch the ready event
-  window.dispatchEvent(new CustomEvent('wfVarModesReady'));
+  window.dispatchEvent(new CustomEvent("wfVarModesReady"));
 
-  console.log('WF Variable Modes ready:', variableModes);
+  console.debug("WF Variable Modes ready:", variableModes);
 };
 
 // Run initialization asynchronously
