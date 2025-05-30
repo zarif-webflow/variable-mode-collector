@@ -9,26 +9,34 @@ declare global {
      * Key is the mode name (from data-variable-mode attribute)
      * Value is an object mapping CSS custom properties to their values
      */
-    data: Record<string, Record<string, string>> | null;
+    data: VariableModes | null;
 
     /**
      * Flag indicating if the variable modes data is ready
      */
     isReady: boolean;
+  }
 
+  /**
+   * Event dispatched when variable modes are ready
+   */
+  interface WfVarModesReadyEvent extends CustomEvent {
+    type: "wfVarModesReady";
+    detail: { data: VariableModes };
+  }
+
+  interface WindowEventMap {
     /**
-     * Register a callback to be executed when variable modes data is ready
-     * If data is already ready, the callback will be executed immediately
-     * @param callback Function to call when data is ready
+     * Event fired when Webflow variable modes are ready
      */
-    onReady: (callback: (data: Record<string, Record<string, string>>) => void) => void;
+    wfVarModesReady: WfVarModesReadyEvent;
   }
 
   interface Window {
     /**
      * Global Webflow Variable Modes object
      */
-    wfVarModes: WfVarModesObject;
+    wfVarModes?: WfVarModesObject;
   }
 
   type VariableModes = Record<string, Record<string, string>>;

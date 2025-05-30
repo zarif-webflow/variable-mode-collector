@@ -10,12 +10,6 @@ interface CachedVariableModes {
   data: VariableModes;
 }
 
-interface WfVarModesObject {
-  data: VariableModes | null;
-  isReady: boolean;
-  onReady: (callback: (data: VariableModes) => void) => void;
-}
-
 // Worker message types
 interface WorkerFetchStylesheetRequest {
   type: "fetchStylesheet";
@@ -26,13 +20,6 @@ interface WorkerFetchStylesheetResponse {
   type: "stylesheetProcessed";
   classRulesMap: Record<string, Record<string, string>>;
   error?: string;
-}
-
-// Initialize global object
-declare global {
-  interface Window {
-    wfVarModes: WfVarModesObject;
-  }
 }
 
 const CACHE_KEY = "webflow-variable-modes-cache";
@@ -260,15 +247,6 @@ const extractWebflowVariableModes = async (): Promise<VariableModes | null> => {
 window.wfVarModes = {
   data: null,
   isReady: false,
-  onReady(callback) {
-    if (this.isReady && this.data) {
-      // If data is already loaded, execute callback immediately
-      setTimeout(() => callback(this.data!), 0);
-    } else {
-      // Otherwise, add event listener
-      window.addEventListener("wfVarModesReady", () => callback(this.data!));
-    }
-  },
 };
 
 // Initialize variable modes and dispatch event
@@ -284,11 +262,17 @@ const initWfVarModes = async (): Promise<void> => {
   }
 
   // Update the global object
+  if (!window.wfVarModes) return;
+
   window.wfVarModes.data = variableModes;
   window.wfVarModes.isReady = true;
 
-  // Dispatch the ready event
-  window.dispatchEvent(new CustomEvent("wfVarModesReady"));
+  // Dispatch the ready event with data
+  window.dispatchEvent(
+    new CustomEvent("wfVarModesReady", {
+      detail: { data: variableModes },
+    })
+  );
 
   console.debug("WF Variable Modes ready:", variableModes);
 };
