@@ -1,5 +1,7 @@
 import { getPublishDate as getWfPublishDate } from "@finsweet/ts-utils";
 
+import { getMultipleHtmlElements } from "@/utils/get-html-element";
+
 /**
  * Extracts CSS custom properties (variables) applied to multiple elements from their classes.
  * This function assumes each element has exactly one class that contains all its styling.
@@ -126,7 +128,7 @@ window.wfVarModes = {
   },
 };
 
-const extractWebflowVariableModes = async (): Promise<VariableModes> => {
+const extractWebflowVariableModes = async (): Promise<VariableModes | null> => {
   // Get the current site publish date
   const currentPublishDate = getWfPublishDate();
   const publishDateString = currentPublishDate?.toISOString() || "";
@@ -151,9 +153,9 @@ const extractWebflowVariableModes = async (): Promise<VariableModes> => {
   // If no cache or invalid cache, calculate fresh data
   console.debug("Calculating fresh variable modes data");
 
-  const variableModeElements = Array.from(
-    document.querySelectorAll<HTMLElement>("[data-variable-mode]")
-  );
+  const variableModeElements = getMultipleHtmlElements({ selector: "[data-variable-mode]" });
+
+  if (!variableModeElements) return null;
 
   // Await the async extraction function
   const result = await extractCssCustomProperties(variableModeElements);
@@ -190,6 +192,13 @@ const extractWebflowVariableModes = async (): Promise<VariableModes> => {
 const initWfVarModes = async (): Promise<void> => {
   // Extract the variable modes (await the async function)
   const variableModes = await extractWebflowVariableModes();
+
+  if (!variableModes) {
+    console.error(
+      "No injected variable modes found with [data-variable-mode] or extraction failed."
+    );
+    return;
+  }
 
   // Update the global object
   window.wfVarModes.data = variableModes;
