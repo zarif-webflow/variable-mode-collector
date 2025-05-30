@@ -1,6 +1,6 @@
 {
-  "name": "z-wf-starter",
-  "description": "Starter template that I use for all my Webflow projects.",
+  "name": "wf-variable-mode-collector",
+  "description": "This package can collect injected webflo variable modes and provide them in a usable format.",
   "license": "ISC",
   "keywords": [],
   "type": "module",
