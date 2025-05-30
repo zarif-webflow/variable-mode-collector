@@ -2,14 +2,116 @@ import { getPublishDate as getWfPublishDate } from "@finsweet/ts-utils";
 
 import { getMultipleHtmlElements } from "@/utils/get-html-element";
 
+// Type definitions
+type VariableModes = Record<string, Record<string, string>>;
+
+interface CachedVariableModes {
+  publishDate: string;
+  data: VariableModes;
+}
+
+interface WfVarModesObject {
+  data: VariableModes | null;
+  isReady: boolean;
+  onReady: (callback: (data: VariableModes) => void) => void;
+}
+
+// Worker message types
+interface WorkerFetchStylesheetRequest {
+  type: "fetchStylesheet";
+  url: string;
+}
+
+interface WorkerFetchStylesheetResponse {
+  type: "stylesheetProcessed";
+  classRulesMap: Record<string, Record<string, string>>;
+  error?: string;
+}
+
+// Initialize global object
+declare global {
+  interface Window {
+    wfVarModes: WfVarModesObject;
+  }
+}
+
+const CACHE_KEY = "webflow-variable-modes-cache";
+
+// Create a worker from a function
+function createWorker(fn: () => void): Worker {
+  const blob = new Blob([`(${fn.toString()})()`], { type: "application/javascript" });
+  const url = URL.createObjectURL(blob);
+  const worker = new Worker(url);
+
+  // Clean up the URL
+  URL.revokeObjectURL(url);
+
+  return worker;
+}
+
+// Worker function that will be converted to a string
+function cssWorkerFunction() {
+  // Set up worker message handler
+  self.addEventListener("message", async (event) => {
+    const msg = event.data;
+
+    if (msg.type === "fetchStylesheet") {
+      try {
+        // Fetch the stylesheet
+        const response = await fetch(msg.url);
+
+        if (!response.ok) {
+          throw new Error(`Failed to fetch stylesheet: ${response.status} ${response.statusText}`);
+        }
+
+        const cssText = await response.text();
+
+        // Parse the CSS text to find class selectors and their properties
+        const classRegex = /\.([^\s{,:]+)\s*{([^}]*)}/g;
+        const classRulesMap: Record<string, Record<string, string>> = {};
+
+        let match;
+        while ((match = classRegex.exec(cssText)) !== null) {
+          const className = match[1];
+          const styleBlock = match[2];
+
+          if (!className || !styleBlock) continue;
+
+          // Extract CSS variables
+          const variableRegex = /(--[^:]+):\s*([^;]+);/g;
+          let varMatch;
+          const customProps: Record<string, string> = {};
+
+          while ((varMatch = variableRegex.exec(styleBlock)) !== null) {
+            const propName = varMatch[1].trim();
+            const propValue = varMatch[2].trim();
+            customProps[propName] = propValue;
+          }
+
+          // Store the results if any CSS variables were found
+          if (Object.keys(customProps).length > 0) {
+            classRulesMap[className] = customProps;
+          }
+        }
+
+        // Send the results back to the main thread
+        self.postMessage({
+          type: "stylesheetProcessed",
+          classRulesMap,
+        });
+      } catch (e) {
+        self.postMessage({
+          type: "stylesheetProcessed",
+          classRulesMap: {},
+          error: e instanceof Error ? e.message : String(e),
+        });
+      }
+    }
+  });
+}
+
 /**
- * Extracts CSS custom properties (variables) applied to multiple elements from their classes.
- * This function assumes each element has exactly one class that contains all its styling.
- * Only extracts properties that start with '--' (CSS variables).
- * The stylesheet is fetched and parsed once for efficiency.
- *
- * @param elements Array of target HTML elements
- * @returns A Promise resolving to a Map associating each element with its CSS custom properties
+ * Extracts CSS custom properties using a web worker to avoid blocking the main thread.
  */
 async function extractCssCustomProperties(
   elements: HTMLElement[]
@@ -20,114 +122,80 @@ async function extractCssCustomProperties(
   // Find the first loaded stylesheet
   const firstStylesheet = document.styleSheets[0];
   if (!firstStylesheet || !firstStylesheet.href) {
-    // Return empty map if no stylesheets or no href
     return result;
   }
 
-  // Create a map to store class-to-CSS-properties mapping
-  const classRulesMap = new Map<string, Record<string, string>>();
+  // Get all class names from elements for efficient processing
+  const elementClassMap = new Map<string, HTMLElement[]>();
+
+  for (const element of elements) {
+    if (!element.classList.length) {
+      result.set(element, {});
+      continue;
+    }
+
+    const className = element.classList[0]!;
+
+    if (!elementClassMap.has(className)) {
+      elementClassMap.set(className, []);
+    }
+
+    elementClassMap.get(className)!.push(element);
+  }
+
+  // Create worker and set up message handling
+  const worker = createWorker(cssWorkerFunction);
 
   try {
-    // Fetch the stylesheet directly instead of accessing through DOM
-    const stylesheetUrl = firstStylesheet.href;
-    const response = await fetch(stylesheetUrl);
+    // Process the stylesheet in the worker
+    const classRulesMap = await new Promise<Record<string, Record<string, string>>>(
+      (resolve, reject) => {
+        worker.onmessage = (event) => {
+          const response = event.data as WorkerFetchStylesheetResponse;
 
-    if (!response.ok) {
-      throw new Error(`Failed to fetch stylesheet: ${response.status} ${response.statusText}`);
-    }
+          if (response.type === "stylesheetProcessed") {
+            if (response.error) {
+              reject(new Error(response.error));
+            } else {
+              resolve(response.classRulesMap);
+            }
+          }
+        };
 
-    const cssText = await response.text();
+        worker.onerror = (error) => {
+          reject(new Error(`Worker error: ${error.message}`));
+        };
 
-    // Parse the CSS text using regex to find class selectors and their properties
-    const classRegex = /\.([^\s{,:]+)\s*{([^}]*)}/g;
-    let match;
-
-    while ((match = classRegex.exec(cssText)) !== null) {
-      const className = match[1];
-      const styleBlock = match[2];
-
-      if (!className || !styleBlock) continue;
-
-      // Extract CSS variables
-      const variableRegex = /(--[^:]+):\s*([^;]+);/g;
-      let varMatch;
-      const customProps: Record<string, string> = {};
-
-      while ((varMatch = variableRegex.exec(styleBlock)) !== null) {
-        const propName = varMatch[1]!.trim();
-        const propValue = varMatch[2]!.trim();
-        customProps[propName] = propValue;
+        // Send request to worker
+        worker.postMessage({
+          type: "fetchStylesheet",
+          url: firstStylesheet.href,
+        } as WorkerFetchStylesheetRequest);
       }
+    );
 
-      // Store the results in the class map if any CSS variables were found
-      if (Object.keys(customProps).length > 0) {
-        classRulesMap.set(className, customProps);
-      }
-    }
+    // Map the results back to the elements
+    for (const [className, matchingElements] of elementClassMap.entries()) {
+      const cssProps = classRulesMap[className] || {};
 
-    // Process each element
-    for (const element of elements) {
-      // Set default empty object for this element
-      const elementRules: Record<string, string> = {};
-      result.set(element, elementRules);
-
-      // Skip elements without classes
-      if (!element.classList.length) {
-        continue;
-      }
-
-      const className = element.classList[0]!; // Get the first class
-
-      // Check if we've already processed this class
-      if (classRulesMap.has(className)) {
-        // Reuse the cached rules
-        result.set(element, { ...classRulesMap.get(className)! });
+      for (const element of matchingElements) {
+        result.set(element, { ...cssProps });
       }
     }
   } catch (e) {
-    console.error("Error fetching or parsing stylesheet:", e);
+    console.error("Error in worker processing:", e);
+  } finally {
+    // Always terminate the worker
+    worker.terminate();
   }
 
   return result;
 }
 
-// Cache interface
-interface CachedVariableModes {
-  publishDate: string;
-  data: VariableModes;
-}
-
-const CACHE_KEY = "webflow-variable-modes-cache";
-
-// Global interface for wfVarModes
-interface WfVarModesObject {
-  data: VariableModes | null;
-  isReady: boolean;
-  onReady: (callback: (data: VariableModes) => void) => void;
-}
-
-// Initialize global object
-declare global {
-  interface Window {
-    wfVarModes: WfVarModesObject;
-  }
-}
-
-// Initialize the global object
-window.wfVarModes = {
-  data: null,
-  isReady: false,
-  onReady(callback) {
-    if (this.isReady && this.data) {
-      // If data is already loaded, execute callback immediately
-      setTimeout(() => callback(this.data!), 0);
-    } else {
-      // Otherwise, add event listener
-      window.addEventListener("wfVarModesReady", () => callback(this.data!));
-    }
-  },
-};
-
+/**
+ * Extracts Webflow variable modes from elements with data-variable-mode attribute.
+ * Uses caching based on the site's publish date.
+ */
 const extractWebflowVariableModes = async (): Promise<VariableModes | null> => {
   // Get the current site publish date
   const currentPublishDate = getWfPublishDate();
@@ -135,7 +203,7 @@ const extractWebflowVariableModes = async (): Promise<VariableModes | null> => {
 
   // Try to get cached data
   try {
-    const cachedData = localStorage.getItem(CACHE_KEY);
+    const cachedData = localStorage.getItem(CACHE_KEY) || null;
 
     if (cachedData && currentPublishDate) {
       const parsedCache = JSON.parse(cachedData) as CachedVariableModes;
@@ -186,6 +254,21 @@ const extractWebflowVariableModes = async (): Promise<VariableModes | null> => {
   }
 
   return variableModes;
+};
+
+// Initialize the global object
+window.wfVarModes = {
+  data: null,
+  isReady: false,
+  onReady(callback) {
+    if (this.isReady && this.data) {
+      // If data is already loaded, execute callback immediately
+      setTimeout(() => callback(this.data!), 0);
+    } else {
+      // Otherwise, add event listener
+      window.addEventListener("wfVarModesReady", () => callback(this.data!));
+    }
+  },
 };
 
 // Initialize variable modes and dispatch event
